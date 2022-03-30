@@ -28,10 +28,14 @@
 #include <malloc.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
 #include <sys/dirent.h>
 #include <sys/iosupport.h>
 #include <sys/statvfs.h>
+
+#include <coreinit/time.h>
+void FSTimeToCalendarTime(OSTime time, OSCalendarTime *calendarTime);
 
 typedef struct _fs_dev_private_t {
     char *mount_path;
@@ -42,15 +46,16 @@ typedef struct _fs_dev_private_t {
 
 typedef struct _fs_dev_file_state_t {
     fs_dev_private_t *dev;
-    int fd;                                    /* File descriptor */
-    int flags;                                 /* Opening flags */
-    int read;                                  /* True if allowed to read from file */
-    int write;                                 /* True if allowed to write to file */
-    int append;                                /* True if allowed to append to file */
-    uint32_t pos;                              /* Current position within the file (in bytes) */
-    uint32_t len;                              /* Total length of the file (in bytes) */
-    struct _fs_dev_file_state_t *prevOpenFile; /* The previous entry in a double-linked FILO list of open files */
-    struct _fs_dev_file_state_t *nextOpenFile; /* The next entry in a double-linked FILO list of open files */
+    int fd;                                     /* File descriptor */
+//    char path[255];                             /* File path, needed for fchmod implementation */
+    int flags;                                  /* Opening flags */
+    bool read;                                  /* True if allowed to read from file */
+    bool write;                                 /* True if allowed to write to file */
+    bool append;                                /* True if allowed to append to file */
+    uint32_t pos;                               /* Current position within the file (in bytes) */
+    uint32_t len;                               /* Total length of the file (in bytes) */
+    struct _fs_dev_file_state_t *prevOpenFile;  /* The previous entry in a double-linked FILO list of open files */
+    struct _fs_dev_file_state_t *nextOpenFile;  /* The next entry in a double-linked FILO list of open files */
 } fs_dev_file_state_t;
 
 typedef struct _fs_dev_dir_entry_t {
@@ -104,6 +109,126 @@ static char *fs_dev_real_path(const char *path, fs_dev_private_t *dev) {
     return new_name;
 }
 
+typedef enum FSDevStatus {
+    FS_STATUS_OK = 0,
+    FS_STATUS_CANCELLED = -1,
+    FS_STATUS_END = -2,
+    FS_STATUS_MAX = -3,
+    FS_STATUS_ALREADY_OPEN = -4,
+    FS_STATUS_EXISTS = -5,
+    FS_STATUS_NOT_FOUND = -6,
+    FS_STATUS_NOT_FILE = -7,
+    FS_STATUS_NOT_DIR = -8,
+    FS_STATUS_ACCESS_ERROR = -9,
+    FS_STATUS_PERMISSION_ERROR = -10,
+    FS_STATUS_FILE_TOO_BIG = -11,
+    FS_STATUS_STORAGE_FULL = -12,
+    FS_STATUS_JOURNAL_FULL = -13,
+    FS_STATUS_UNSUPPORTED_CMD = -14,
+    FS_STATUS_MEDIA_NOT_READY = -15,
+    FS_STATUS_MEDIA_ERROR = -17,
+    FS_STATUS_CORRUPTED = -18,
+    FS_STATUS_FATAL_ERROR = -0x400,
+} FSDevStatus;
+
+typedef enum FSDevError {
+    FS_ERROR_NOT_INIT = -0x30001,
+    FS_ERROR_BUSY = -0x30002,
+    FS_ERROR_CANCELLED = -0x30003,
+    FS_ERROR_END_OF_DIR = -0x30004,
+    FS_ERROR_END_OF_FILE = -0x30005,
+    FS_ERROR_MAX_MOUNT_POINTS = -0x30010,
+    FS_ERROR_MAX_VOLUMES = -0x30011,
+    FS_ERROR_MAX_CLIENTS = -0x30012,
+    FS_ERROR_MAX_FILES = -0x30013,
+    FS_ERROR_MAX_DIRS = -0x30014,
+    FS_ERROR_ALREADY_OPEN = -0x30015,
+    FS_ERROR_ALREADY_EXISTS = -0x30016,
+    FS_ERROR_NOT_FOUND = -0x30017,
+    FS_ERROR_NOT_EMPTY = -0x30018,
+    FS_ERROR_ACCESS_ERROR = -0x30019,
+    FS_ERROR_PERMISSION_ERROR = -0x3001A,
+    FS_ERROR_DATA_CORRUPTED = -0x3001B,
+    FS_ERROR_STORAGE_FULL = -0x3001C,
+    FS_ERROR_JOURNAL_FULL = -0x3001D,
+    FS_ERROR_UNAVAILABLE_COMMAND = -0x3001F,
+    FS_ERROR_UNSUPPORTED_COMMAND = -0x30020,
+    FS_ERROR_INVALID_PARAM = -0x30021,
+    FS_ERROR_INVALID_PATH = -0x30022,
+    FS_ERROR_INVALID_BUFFER = -0x30023,
+    FS_ERROR_INVALID_ALIGNMENT = -0x30024,
+    FS_ERROR_INVALID_CLIENTHANDLE = -0x30025,
+    FS_ERROR_INVALID_FILEHANDLE = -0x30026,
+    FS_ERROR_INVALID_DIRHANDLE = -0x30027,
+    FS_ERROR_NOT_FILE = -0x30028,
+    FS_ERROR_NOT_DIR = -0x30029,
+    FS_ERROR_FILE_TOO_BIG = -0x3002A,
+    FS_ERROR_OUT_OF_RANGE = -0x3002B,
+    FS_ERROR_OUT_OF_RESOURCES = -0x3002C,
+    FS_ERROR_MEDIA_NOT_READY = -0x30030,
+    FS_ERROR_MEDIA_ERROR = -0x30031,
+    FS_ERROR_WRITE_PROTECTED = -0x30032,
+    FS_ERROR_INVALID_MEDIA = -0x30033,
+} FSDevError;
+
+
+static int fs_dev_translate_error(FSDevStatus error) {
+    switch ((int)error) {
+        case FS_STATUS_END:
+            return ENOENT;
+        case FS_STATUS_CANCELLED:
+            return EINVAL;
+        case FS_STATUS_EXISTS:
+            return EEXIST;
+        case FS_STATUS_MEDIA_ERROR:
+            return EIO;
+        case FS_STATUS_NOT_FOUND:
+            return ENOENT;
+        case FS_STATUS_PERMISSION_ERROR:
+            return EPERM;
+        case FS_STATUS_STORAGE_FULL:
+            return ENOSPC;
+        case FS_ERROR_ALREADY_EXISTS:
+            return EEXIST;
+        case FS_ERROR_BUSY:
+            return EBUSY;
+        case FS_ERROR_CANCELLED:
+            return ECANCELED;
+        case FS_STATUS_FILE_TOO_BIG:
+            return EFBIG;
+        case FS_ERROR_INVALID_PATH:
+            return ENAMETOOLONG;
+        case FS_ERROR_NOT_DIR:
+            return ENOTDIR;
+        case FS_ERROR_NOT_FILE:
+            return EISDIR;
+        case FS_ERROR_OUT_OF_RANGE:
+            return ESPIPE;
+        case FS_ERROR_UNSUPPORTED_COMMAND:
+            return ENOTSUP;
+        case FS_ERROR_WRITE_PROTECTED:
+            return EROFS;
+        default:
+            return (int32_t)error;
+    }
+}
+
+static time_t fs_dev_translate_time(OSTime timeValue) {
+    OSCalendarTime fileTime;
+    FSTimeToCalendarTime(timeValue, &fileTime);
+    // WHBLogPrintf("[DEBUG] date: %d-%d-%d, time: %d:%d:%d", fileTime.tm_year, fileTime.tm_mon, fileTime.tm_mday, fileTime.tm_hour, fileTime.tm_min, fileTime.tm_sec);
+    struct tm posixTime = {0};
+    posixTime.tm_year = fileTime.tm_year - 1900;
+    posixTime.tm_mon = fileTime.tm_mon;
+    posixTime.tm_mday = fileTime.tm_mday;
+    posixTime.tm_hour = fileTime.tm_hour;
+    posixTime.tm_min = fileTime.tm_min;
+    posixTime.tm_sec = fileTime.tm_sec;
+    posixTime.tm_yday = fileTime.tm_yday;
+    posixTime.tm_wday = fileTime.tm_wday;
+    return mktime(&posixTime);
+}
+
 static int fs_dev_open_r(struct _reent *r, void *fileStruct, const char *path, int flags, int mode) {
     fs_dev_private_t *dev = fs_dev_get_device_data(path);
     if (!dev) {
@@ -111,7 +236,7 @@ static int fs_dev_open_r(struct _reent *r, void *fileStruct, const char *path, i
         return -1;
     }
 
-    fs_dev_file_state_t *file = (fs_dev_file_state_t *) fileStruct;
+    fs_dev_file_state_t *file = (fs_dev_file_state_t *)fileStruct;
 
     file->dev = dev;
     // Determine which mode the file is opened for
@@ -121,34 +246,34 @@ static int fs_dev_open_r(struct _reent *r, void *fileStruct, const char *path, i
 
     // Map flags to open modes
     if (flags == 0) {
-        file->read   = 1;
-        file->write  = 0;
-        file->append = 0;
+        file->read   = true;
+        file->write  = false;
+        file->append = false;
         fsMode       = "r";
     } else if (flags == 2) {
-        file->read   = 1;
-        file->write  = 1;
-        file->append = 0;
+        file->read   = true;
+        file->write  = true;
+        file->append = false;
         fsMode       = "r+";
     } else if (flags == 0x601) {
-        file->read   = 0;
-        file->write  = 1;
-        file->append = 0;
+        file->read   = false;
+        file->write  = true;
+        file->append = false;
         fsMode       = "w";
     } else if (flags == 0x602) {
-        file->read   = 1;
-        file->write  = 1;
-        file->append = 0;
+        file->read   = true;
+        file->write  = true;
+        file->append = false;
         fsMode       = "w+";
     } else if (flags == 0x209) {
-        file->read   = 0;
-        file->write  = 1;
-        file->append = 1;
+        file->read   = false;
+        file->write  = true;
+        file->append = true;
         fsMode       = "a";
     } else if (flags == 0x20A) {
-        file->read   = 1;
-        file->write  = 1;
-        file->append = 1;
+        file->read   = true;
+        file->write  = true;
+        file->append = true;
         fsMode       = "a+";
     } else {
         r->_errno = EINVAL;
@@ -176,7 +301,7 @@ static int fs_dev_open_r(struct _reent *r, void *fileStruct, const char *path, i
         result = IOSUHAX_FSA_StatFile(dev->fsaFd, fd, &stats);
         if (result != 0) {
             IOSUHAX_FSA_CloseFile(dev->fsaFd, fd);
-            r->_errno = result;
+            r->_errno = fs_dev_translate_error(result);
             OSUnlockMutex(dev->pMutex);
             return -1;
         }
@@ -184,10 +309,10 @@ static int fs_dev_open_r(struct _reent *r, void *fileStruct, const char *path, i
         file->pos = 0;
         file->len = stats.size;
         OSUnlockMutex(dev->pMutex);
-        return (int) file;
+        return (int)file;
     }
 
-    r->_errno = result;
+    r->_errno = fs_dev_translate_error(result);
     OSUnlockMutex(dev->pMutex);
     return -1;
 }
@@ -207,7 +332,7 @@ static int fs_dev_close_r(struct _reent *r, void *fd) {
     OSUnlockMutex(file->dev->pMutex);
 
     if (result < 0) {
-        r->_errno = result;
+        r->_errno = fs_dev_translate_error(result);
         return -1;
     }
     return 0;
@@ -269,7 +394,7 @@ static ssize_t fs_dev_write_r(struct _reent *r, void *fd, const char *ptr, size_
 
         int result = IOSUHAX_FSA_WriteFile(file->dev->fsaFd, ptr + done, 0x01, write_size, file->fd, 0);
         if (result < 0) {
-            r->_errno = result;
+            r->_errno = fs_dev_translate_error(result);
             break;
         } else if (result == 0) {
             if (write_size > 0)
@@ -306,7 +431,7 @@ static ssize_t fs_dev_read_r(struct _reent *r, void *fd, char *ptr, size_t len) 
 
         int result = IOSUHAX_FSA_ReadFile(file->dev->fsaFd, ptr + done, 0x01, read_size, file->fd, 0);
         if (result < 0) {
-            r->_errno = result;
+            r->_errno = fs_dev_translate_error(result);
             done      = 0;
             break;
         } else if (result == 0) {
@@ -338,30 +463,43 @@ static int fs_dev_fstat_r(struct _reent *r, void *fd, struct stat *st) {
     fileStat_s stats;
     int result = IOSUHAX_FSA_StatFile(file->dev->fsaFd, (int) fd, &stats);
     if (result != 0) {
-        r->_errno = result;
+        r->_errno = fs_dev_translate_error(result);
         OSUnlockMutex(file->dev->pMutex);
         return -1;
     }
 
-    st->st_mode   = S_IFREG;
+    // Turn Wii U's FSStat mode to posix stat
+    if ((stats.flag & FS_DEV_STAT_LINK) == FS_DEV_STAT_LINK) {
+        st->st_mode = S_IFLNK;
+    }
+    else if ((stats.flag & FS_DEV_STAT_DIRECTORY) == FS_DEV_STAT_DIRECTORY) {
+        st->st_mode = S_IFDIR;
+    }
+    else if ((stats.flag & FS_DEV_STAT_FILE) == FS_DEV_STAT_FILE) {
+        st->st_mode = S_IFREG;
+    }
+    else {
+        st->st_mode = S_IFREG;
+    }
+
+    // Convert remaining fields to posix stat
     st->st_size   = stats.size;
     st->st_blocks = (stats.size + 511) >> 9;
     st->st_nlink  = 1;
-
     // Fill in the generic entry stats
-    st->st_dev   = stats.id;
+    st->st_dev   = (dev_t)file->dev;
     st->st_uid   = stats.owner_id;
     st->st_gid   = stats.group_id;
     st->st_ino   = stats.id;
-    st->st_atime = stats.mtime;
-    st->st_ctime = stats.ctime;
-    st->st_mtime = stats.mtime;
+    st->st_atime = fs_dev_translate_time(stats.mtime);
+    st->st_ctime = fs_dev_translate_time(stats.ctime);
+    st->st_mtime = fs_dev_translate_time(stats.mtime);
     OSUnlockMutex(file->dev->pMutex);
     return 0;
 }
 
 static int fs_dev_ftruncate_r(struct _reent *r, void *fd, off_t len) {
-    fs_dev_file_state_t *file = (fs_dev_file_state_t *) fd;
+    fs_dev_file_state_t *file = (fs_dev_file_state_t *)fd;
     if (!file->dev) {
         r->_errno = ENODEV;
         return -1;
@@ -404,30 +542,42 @@ static int fs_dev_stat_r(struct _reent *r, const char *path, struct stat *st) {
     }
 
     fileStat_s stats;
-
     int result = IOSUHAX_FSA_GetStat(dev->fsaFd, real_path, &stats);
 
     free(real_path);
 
     if (result < 0) {
-        r->_errno = result;
+        r->_errno = fs_dev_translate_error(result);
         OSUnlockMutex(dev->pMutex);
         return -1;
     }
 
-    // mark root also as directory
-    st->st_mode   = ((stats.flag & 0x80000000) || (strlen(dev->mount_path) + 1 == strlen(real_path))) ? S_IFDIR : S_IFREG;
+    // Turn Wii U's FSStat mode to posix stat
+    if ((stats.flag & FS_DEV_STAT_LINK) == FS_DEV_STAT_LINK) {
+        st->st_mode = S_IFLNK;
+    }
+    else if ((stats.flag & FS_DEV_STAT_DIRECTORY) == FS_DEV_STAT_DIRECTORY) {
+        st->st_mode = S_IFDIR;
+    }
+    else if ((stats.flag & FS_DEV_STAT_FILE) == FS_DEV_STAT_FILE) {
+        st->st_mode = S_IFREG;
+    }
+    else {
+        st->st_mode = S_IFREG;
+    }
+
+    // Convert remaining fields to posix stat
     st->st_nlink  = 1;
     st->st_size   = stats.size;
     st->st_blocks = (stats.size + 511) >> 9;
     // Fill in the generic entry stats
-    st->st_dev   = stats.id;
+    st->st_dev   = (dev_t)dev;
     st->st_uid   = stats.owner_id;
     st->st_gid   = stats.group_id;
     st->st_ino   = stats.id;
-    st->st_atime = stats.mtime;
-    st->st_ctime = stats.ctime;
-    st->st_mtime = stats.mtime;
+    st->st_atime = fs_dev_translate_time(stats.mtime);
+    st->st_ctime = fs_dev_translate_time(stats.ctime);
+    st->st_mtime = fs_dev_translate_time(stats.mtime);
 
     OSUnlockMutex(dev->pMutex);
 
@@ -462,7 +612,7 @@ static int fs_dev_unlink_r(struct _reent *r, const char *name) {
     OSUnlockMutex(dev->pMutex);
 
     if (result < 0) {
-        r->_errno = result;
+        r->_errno = fs_dev_translate_error(result);
         return -1;
     }
 
@@ -492,7 +642,7 @@ static int fs_dev_chdir_r(struct _reent *r, const char *name) {
     OSUnlockMutex(dev->pMutex);
 
     if (result < 0) {
-        r->_errno = result;
+        r->_errno = fs_dev_translate_error(result);
         return -1;
     }
 
@@ -523,7 +673,7 @@ static int fs_dev_rename_r(struct _reent *r, const char *oldName, const char *ne
     }
 
     //! TODO
-    int result = -ENOTSUP;
+    int result = FS_ERROR_UNSUPPORTED_COMMAND;
 
     free(real_oldpath);
     free(real_newpath);
@@ -531,7 +681,7 @@ static int fs_dev_rename_r(struct _reent *r, const char *oldName, const char *ne
     OSUnlockMutex(dev->pMutex);
 
     if (result < 0) {
-        r->_errno = result;
+        r->_errno = fs_dev_translate_error(result);
         return -1;
     }
 
@@ -561,7 +711,7 @@ static int fs_dev_mkdir_r(struct _reent *r, const char *path, int mode) {
     OSUnlockMutex(dev->pMutex);
 
     if (result < 0) {
-        r->_errno = result;
+        r->_errno = fs_dev_translate_error(result);
         return -1;
     }
 
@@ -591,12 +741,42 @@ static int fs_dev_chmod_r(struct _reent *r, const char *path, int mode) {
     OSUnlockMutex(dev->pMutex);
 
     if (result < 0) {
-        r->_errno = result;
+        r->_errno = fs_dev_translate_error(result);
         return -1;
     }
 
     return 0;
 }
+
+// static int fs_dev_fchmod_r(struct _reent *r, void *fd, mode_t mode) {
+//     fs_dev_file_state_t *file = (fs_dev_file_state_t *)fd;
+//     if (!file->dev) {
+//         r->_errno = ENODEV;
+//         return -1;
+//     }
+
+//     OSLockMutex(file->dev->pMutex);
+
+//     char *real_path = fs_dev_real_path(file->path, file->dev);
+//     if (!real_path) {
+//         r->_errno = ENOMEM;
+//         OSUnlockMutex(file->dev->pMutex);
+//         return -1;
+//     }
+
+//     int result = IOSUHAX_FSA_ChangeMode(file->dev->fsaFd, real_path, mode);
+
+//     free(real_path);
+
+//     OSUnlockMutex(file->dev->pMutex);
+
+//     if (result < 0) {
+//         r->_errno = fs_dev_translate_error(result);
+//         return -1;
+//     }
+
+//     return 0;
+// }
 
 static int fs_dev_statvfs_r(struct _reent *r, const char *path, struct statvfs *buf) {
     fs_dev_private_t *dev = fs_dev_get_device_data(path);
@@ -619,12 +799,12 @@ static int fs_dev_statvfs_r(struct _reent *r, const char *path, struct statvfs *
 
     uint64_t size;
 
-    int result = IOSUHAX_FSA_GetDeviceInfo(dev->fsaFd, real_path, 0x00, (uint32_t *) &size);
+    int result = IOSUHAX_FSA_GetDeviceInfo(dev->fsaFd, real_path, 0x00, (uint32_t *)&size);
 
     free(real_path);
 
     if (result < 0) {
-        r->_errno = result;
+        r->_errno = fs_dev_translate_error(result);
         OSUnlockMutex(dev->pMutex);
         return -1;
     }
@@ -648,7 +828,7 @@ static int fs_dev_statvfs_r(struct _reent *r, const char *path, struct statvfs *
     buf->f_ffree = 0xffffffff;
 
     // File system id
-    buf->f_fsid = (int) dev;
+    buf->f_fsid = (int)dev;
 
     // Bit mask of f_flag values.
     buf->f_flag = 0;
@@ -688,7 +868,7 @@ static DIR_ITER *fs_dev_diropen_r(struct _reent *r, DIR_ITER *dirState, const ch
     OSUnlockMutex(dev->pMutex);
 
     if (result < 0) {
-        r->_errno = result;
+        r->_errno = fs_dev_translate_error(result);
         return NULL;
     }
 
@@ -712,7 +892,7 @@ static int fs_dev_dirclose_r(struct _reent *r, DIR_ITER *dirState) {
     OSUnlockMutex(dirIter->dev->pMutex);
 
     if (result < 0) {
-        r->_errno = result;
+        r->_errno = fs_dev_translate_error(result);
         return -1;
     }
     return 0;
@@ -732,7 +912,7 @@ static int fs_dev_dirreset_r(struct _reent *r, DIR_ITER *dirState) {
     OSUnlockMutex(dirIter->dev->pMutex);
 
     if (result < 0) {
-        r->_errno = result;
+        r->_errno = fs_dev_translate_error(result);
         return -1;
     }
     return 0;
@@ -752,7 +932,7 @@ static int fs_dev_dirnext_r(struct _reent *r, DIR_ITER *dirState, char *filename
     int result = IOSUHAX_FSA_ReadDir(dirIter->dev->fsaFd, dirIter->dirHandle, dir_entry);
     if (result < 0) {
         free(dir_entry);
-        r->_errno = result;
+        r->_errno = fs_dev_translate_error(result);
         OSUnlockMutex(dirIter->dev->pMutex);
         return -1;
     }
@@ -762,17 +942,32 @@ static int fs_dev_dirnext_r(struct _reent *r, DIR_ITER *dirState, char *filename
 
     if (st) {
         memset(st, 0, sizeof(struct stat));
-        st->st_mode   = (dir_entry->stat.flag & 0x80000000) ? S_IFDIR : S_IFREG;
+
+        // Turn Wii U's FSStat mode to posix stat
+        if ((dir_entry->stat.flag & FS_DEV_STAT_LINK) == FS_DEV_STAT_LINK) {
+            st->st_mode = S_IFLNK;
+        }
+        else if ((dir_entry->stat.flag & FS_DEV_STAT_DIRECTORY) == FS_DEV_STAT_DIRECTORY) {
+            st->st_mode = S_IFDIR;
+        }
+        else if ((dir_entry->stat.flag & FS_DEV_STAT_FILE) == FS_DEV_STAT_FILE) {
+            st->st_mode = S_IFREG;
+        }
+        else {
+            st->st_mode = 0;
+        }
+
+        // Convert remaining fields to posix stat
         st->st_nlink  = 1;
         st->st_size   = dir_entry->stat.size;
         st->st_blocks = (dir_entry->stat.size + 511) >> 9;
-        st->st_dev    = dir_entry->stat.id;
+        st->st_dev    = (dev_t)dirIter->dev;
         st->st_uid    = dir_entry->stat.owner_id;
         st->st_gid    = dir_entry->stat.group_id;
         st->st_ino    = dir_entry->stat.id;
-        st->st_atime  = dir_entry->stat.mtime;
-        st->st_ctime  = dir_entry->stat.ctime;
-        st->st_mtime  = dir_entry->stat.mtime;
+        st->st_atime  = fs_dev_translate_time(dir_entry->stat.mtime);
+        st->st_ctime  = fs_dev_translate_time(dir_entry->stat.ctime);
+        st->st_mtime  = fs_dev_translate_time(dir_entry->stat.mtime);
     }
 
     free(dir_entry);

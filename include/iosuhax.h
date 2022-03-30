@@ -29,26 +29,50 @@
 extern "C" {
 #endif
 
-typedef struct {
-    uint32_t flag;
-    uint32_t permission;
+// From https://github.com/koolkdev/libiosuhax/blob/more_filesystem_functions/source/iosuhax.h#L39-L43, verified to be correct
+typedef enum FSDevStatFlags {
+    FS_DEV_STAT_DIRECTORY           = 0x80000000,
+    FS_DEV_STAT_QUOTA               = 0x60000000,
+    FS_DEV_STAT_FILE                = 0x01000000,
+    FS_DEV_STAT_ENCRYPTED_FILE      = 0x00800000, // e.g. unaccessible vWii .nfs files
+    FS_DEV_STAT_LINK                = 0x00010000
+} FSDevStatFlags; // remaining flags undeciphered: 0x0C000000
+
+// Deprecated: Use FS_STAT_DIRECTORY
+#define DIR_ENTRY_IS_DIRECTORY   FS_DEV_STAT_DIRECTORY
+
+typedef enum FSDevMode {
+    FS_DEV_MODE_READ_OWNER = 0x400,
+    FS_DEV_MODE_WRITE_OWNER = 0x200,
+    FS_DEV_MODE_EXEC_OWNER = 0x100,
+
+    FS_DEV_MODE_READ_GROUP = 0x040,
+    FS_DEV_MODE_WRITE_GROUP = 0x020,
+    FS_DEV_MODE_EXEC_GROUP = 0x010,
+
+    FS_DEV_MODE_READ_OTHER = 0x004,
+    FS_DEV_MODE_WRITE_OTHER = 0x002,
+    FS_DEV_MODE_EXEC_OTHER = 0x001,
+} FSDevMode;
+
+typedef struct __attribute__((__packed__)) {
+    FSDevStatFlags flag;
+    FSDevMode permission;
     uint32_t owner_id;
     uint32_t group_id;
-    uint32_t size;     // size in bytes
+    uint32_t size; // size in bytes
     uint32_t physsize; // physical size on disk in bytes
-    uint32_t unk[3];
+    uint64_t quotaSize;
     uint32_t id;
-    uint32_t ctime;
-    uint32_t mtime;
-    uint32_t unk2[0x0D];
+    uint64_t ctime;
+    uint64_t mtime;
+    uint8_t unknownBytes[0x30];
 } fileStat_s;
 
-typedef struct {
+typedef struct __attribute__((__packed__)) {
     fileStat_s stat;
-    char name[0x100];
+    char name[256];
 } directoryEntry_s;
-
-#define DIR_ENTRY_IS_DIRECTORY   0x80000000
 
 #define FSA_MOUNTFLAGS_BINDMOUNT (1 << 0)
 #define FSA_MOUNTFLAGS_GLOBAL    (1 << 1)
