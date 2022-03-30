@@ -39,7 +39,9 @@ typedef enum FSDevStatFlags {
 } FSDevStatFlags; // remaining flags undeciphered: 0x0C000000
 
 // Deprecated: Use FS_STAT_DIRECTORY
+#ifndef DIR_ENTRY_IS_DIRECTORY
 #define DIR_ENTRY_IS_DIRECTORY   FS_DEV_STAT_DIRECTORY
+#endif
 
 typedef enum FSDevMode {
     FS_DEV_MODE_READ_OWNER = 0x400,
