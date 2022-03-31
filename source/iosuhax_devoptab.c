@@ -26,16 +26,15 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <malloc.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdbool.h>
 #include <string.h>
 #include <sys/dirent.h>
 #include <sys/iosupport.h>
 #include <sys/statvfs.h>
 
 #include <coreinit/time.h>
-#include <coreinit/filesystem.h>
 void FSTimeToCalendarTime(OSTime time, OSCalendarTime *calendarTime);
 
 typedef struct _fs_dev_private_t {
@@ -47,16 +46,15 @@ typedef struct _fs_dev_private_t {
 
 typedef struct _fs_dev_file_state_t {
     fs_dev_private_t *dev;
-    int fd;                                     /* File descriptor */
-//    char path[255];                             /* File path, needed for fchmod implementation */
-    int flags;                                  /* Opening flags */
-    bool read;                                  /* True if allowed to read from file */
-    bool write;                                 /* True if allowed to write to file */
-    bool append;                                /* True if allowed to append to file */
-    uint32_t pos;                               /* Current position within the file (in bytes) */
-    uint32_t len;                               /* Total length of the file (in bytes) */
-    struct _fs_dev_file_state_t *prevOpenFile;  /* The previous entry in a double-linked FILO list of open files */
-    struct _fs_dev_file_state_t *nextOpenFile;  /* The next entry in a double-linked FILO list of open files */
+    int fd;                                    /* File descriptor */
+    int flags;                                 /* Opening flags */
+    bool read;                                 /* True if allowed to read from file */
+    bool write;                                /* True if allowed to write to file */
+    bool append;                               /* True if allowed to append to file */
+    uint32_t pos;                              /* Current position within the file (in bytes) */
+    uint32_t len;                              /* Total length of the file (in bytes) */
+    struct _fs_dev_file_state_t *prevOpenFile; /* The previous entry in a double-linked FILO list of open files */
+    struct _fs_dev_file_state_t *nextOpenFile; /* The next entry in a double-linked FILO list of open files */
 } fs_dev_file_state_t;
 
 typedef struct _fs_dev_dir_entry_t {
@@ -111,11 +109,11 @@ static char *fs_dev_real_path(const char *path, fs_dev_private_t *dev) {
 }
 
 static int fs_dev_translate_error(FSStatus error) {
-    switch ((int)error) {
+    switch ((int) error) {
         case FS_STATUS_END:
             return ENOENT;
         case FS_STATUS_CANCELLED:
-            return EINVAL;
+            return ECANCELED;
         case FS_STATUS_EXISTS:
             return EEXIST;
         case FS_STATUS_MEDIA_ERROR:
@@ -126,44 +124,52 @@ static int fs_dev_translate_error(FSStatus error) {
             return EPERM;
         case FS_STATUS_STORAGE_FULL:
             return ENOSPC;
-        case FS_ERROR_ALREADY_EXISTS:
-            return EEXIST;
-        case FS_ERROR_BUSY:
-            return EBUSY;
-        case FS_ERROR_CANCELLED:
-            return ECANCELED;
         case FS_STATUS_FILE_TOO_BIG:
             return EFBIG;
-        case FS_ERROR_INVALID_PATH:
-            return ENAMETOOLONG;
-        case FS_ERROR_NOT_DIR:
+        case FS_STATUS_NOT_DIR:
             return ENOTDIR;
-        case FS_ERROR_NOT_FILE:
+        case FS_STATUS_NOT_FILE:
             return EISDIR;
-        case FS_ERROR_OUT_OF_RANGE:
-            return ESPIPE;
-        case FS_ERROR_UNSUPPORTED_COMMAND:
+        case FS_STATUS_MAX:
+            return ENFILE;
+        case FS_STATUS_ACCESS_ERROR:
+            return EACCES;
+        case FS_STATUS_JOURNAL_FULL:
+            return ENOSPC;
+        case FS_STATUS_UNSUPPORTED_CMD:
             return ENOTSUP;
-        case FS_ERROR_WRITE_PROTECTED:
-            return EROFS;
-        default:
-            return (int32_t)error;
+        case FS_STATUS_MEDIA_NOT_READY:
+            return EOWNERDEAD;
+        case FS_STATUS_ALREADY_OPEN:
+        case FS_STATUS_CORRUPTED:
+        case FS_STATUS_FATAL_ERROR:
+            return EIO;
     }
+    return (int) error;
+}
+
+static mode_t fs_dev_translate_mode(FSDevStatFlags mode) {
+    if ((mode & FS_DEV_STAT_LINK) == FS_DEV_STAT_LINK) return S_IFLNK;
+    else if ((mode & FS_DEV_STAT_DIRECTORY) == FS_DEV_STAT_DIRECTORY)
+        return S_IFDIR;
+    else if ((mode & FS_DEV_STAT_FILE) == FS_DEV_STAT_FILE)
+        return S_IFREG;
+    else
+        return 0;
 }
 
 static time_t fs_dev_translate_time(OSTime timeValue) {
     OSCalendarTime fileTime;
     FSTimeToCalendarTime(timeValue, &fileTime);
-    // WHBLogPrintf("[DEBUG] date: %d-%d-%d, time: %d:%d:%d", fileTime.tm_year, fileTime.tm_mon, fileTime.tm_mday, fileTime.tm_hour, fileTime.tm_min, fileTime.tm_sec);
     struct tm posixTime = {0};
-    posixTime.tm_year = fileTime.tm_year - 1900;
-    posixTime.tm_mon = fileTime.tm_mon;
-    posixTime.tm_mday = fileTime.tm_mday;
-    posixTime.tm_hour = fileTime.tm_hour;
-    posixTime.tm_min = fileTime.tm_min;
-    posixTime.tm_sec = fileTime.tm_sec;
-    posixTime.tm_yday = fileTime.tm_yday;
-    posixTime.tm_wday = fileTime.tm_wday;
+    posixTime.tm_year   = fileTime.tm_year - 1900;
+    posixTime.tm_mon    = fileTime.tm_mon;
+    posixTime.tm_mday   = fileTime.tm_mday;
+    posixTime.tm_hour   = fileTime.tm_hour;
+    posixTime.tm_min    = fileTime.tm_min;
+    posixTime.tm_sec    = fileTime.tm_sec;
+    posixTime.tm_yday   = fileTime.tm_yday;
+    posixTime.tm_wday   = fileTime.tm_wday;
     return mktime(&posixTime);
 }
 
@@ -174,7 +180,7 @@ static int fs_dev_open_r(struct _reent *r, void *fileStruct, const char *path, i
         return -1;
     }
 
-    fs_dev_file_state_t *file = (fs_dev_file_state_t *)fileStruct;
+    fs_dev_file_state_t *file = (fs_dev_file_state_t *) fileStruct;
 
     file->dev = dev;
     // Determine which mode the file is opened for
@@ -247,7 +253,7 @@ static int fs_dev_open_r(struct _reent *r, void *fileStruct, const char *path, i
         file->pos = 0;
         file->len = stats.size;
         OSUnlockMutex(dev->pMutex);
-        return (int)file;
+        return (int) file;
     }
 
     r->_errno = fs_dev_translate_error(result);
@@ -406,26 +412,13 @@ static int fs_dev_fstat_r(struct _reent *r, void *fd, struct stat *st) {
         return -1;
     }
 
-    // Turn Wii U's FSStat mode to posix stat
-    if ((stats.flag & FS_DEV_STAT_LINK) == FS_DEV_STAT_LINK) {
-        st->st_mode = S_IFLNK;
-    }
-    else if ((stats.flag & FS_DEV_STAT_DIRECTORY) == FS_DEV_STAT_DIRECTORY) {
-        st->st_mode = S_IFDIR;
-    }
-    else if ((stats.flag & FS_DEV_STAT_FILE) == FS_DEV_STAT_FILE) {
-        st->st_mode = S_IFREG;
-    }
-    else {
-        st->st_mode = S_IFREG;
-    }
-
-    // Convert remaining fields to posix stat
+    // Convert fields to posix stat
+    st->st_mode   = fs_dev_translate_mode(stats.flag);
     st->st_size   = stats.size;
     st->st_blocks = (stats.size + 511) >> 9;
     st->st_nlink  = 1;
     // Fill in the generic entry stats
-    st->st_dev   = (dev_t)file->dev;
+    st->st_dev   = (dev_t) file->dev;
     st->st_uid   = stats.owner_id;
     st->st_gid   = stats.group_id;
     st->st_ino   = stats.id;
@@ -437,7 +430,7 @@ static int fs_dev_fstat_r(struct _reent *r, void *fd, struct stat *st) {
 }
 
 static int fs_dev_ftruncate_r(struct _reent *r, void *fd, off_t len) {
-    fs_dev_file_state_t *file = (fs_dev_file_state_t *)fd;
+    fs_dev_file_state_t *file = (fs_dev_file_state_t *) fd;
     if (!file->dev) {
         r->_errno = ENODEV;
         return -1;
@@ -490,26 +483,13 @@ static int fs_dev_stat_r(struct _reent *r, const char *path, struct stat *st) {
         return -1;
     }
 
-    // Turn Wii U's FSStat mode to posix stat
-    if ((stats.flag & FS_DEV_STAT_LINK) == FS_DEV_STAT_LINK) {
-        st->st_mode = S_IFLNK;
-    }
-    else if ((stats.flag & FS_DEV_STAT_DIRECTORY) == FS_DEV_STAT_DIRECTORY) {
-        st->st_mode = S_IFDIR;
-    }
-    else if ((stats.flag & FS_DEV_STAT_FILE) == FS_DEV_STAT_FILE) {
-        st->st_mode = S_IFREG;
-    }
-    else {
-        st->st_mode = S_IFREG;
-    }
-
-    // Convert remaining fields to posix stat
+    // Convert fields to posix stat
+    st->st_mode   = (strlen(dev->mount_path) + 1 == strlen(real_path)) ? S_IFDIR : fs_dev_translate_mode(stats.flag); // mark root as directory too
     st->st_nlink  = 1;
     st->st_size   = stats.size;
     st->st_blocks = (stats.size + 511) >> 9;
     // Fill in the generic entry stats
-    st->st_dev   = (dev_t)dev;
+    st->st_dev   = (dev_t) dev;
     st->st_uid   = stats.owner_id;
     st->st_gid   = stats.group_id;
     st->st_ino   = stats.id;
@@ -686,36 +666,6 @@ static int fs_dev_chmod_r(struct _reent *r, const char *path, int mode) {
     return 0;
 }
 
-// static int fs_dev_fchmod_r(struct _reent *r, void *fd, mode_t mode) {
-//     fs_dev_file_state_t *file = (fs_dev_file_state_t *)fd;
-//     if (!file->dev) {
-//         r->_errno = ENODEV;
-//         return -1;
-//     }
-
-//     OSLockMutex(file->dev->pMutex);
-
-//     char *real_path = fs_dev_real_path(file->path, file->dev);
-//     if (!real_path) {
-//         r->_errno = ENOMEM;
-//         OSUnlockMutex(file->dev->pMutex);
-//         return -1;
-//     }
-
-//     int result = IOSUHAX_FSA_ChangeMode(file->dev->fsaFd, real_path, mode);
-
-//     free(real_path);
-
-//     OSUnlockMutex(file->dev->pMutex);
-
-//     if (result < 0) {
-//         r->_errno = fs_dev_translate_error(result);
-//         return -1;
-//     }
-
-//     return 0;
-// }
-
 static int fs_dev_statvfs_r(struct _reent *r, const char *path, struct statvfs *buf) {
     fs_dev_private_t *dev = fs_dev_get_device_data(path);
     if (!dev) {
@@ -737,7 +687,7 @@ static int fs_dev_statvfs_r(struct _reent *r, const char *path, struct statvfs *
 
     uint64_t size;
 
-    int result = IOSUHAX_FSA_GetDeviceInfo(dev->fsaFd, real_path, 0x00, (uint32_t *)&size);
+    int result = IOSUHAX_FSA_GetDeviceInfo(dev->fsaFd, real_path, 0x00, (uint32_t *) &size);
 
     free(real_path);
 
@@ -766,7 +716,7 @@ static int fs_dev_statvfs_r(struct _reent *r, const char *path, struct statvfs *
     buf->f_ffree = 0xffffffff;
 
     // File system id
-    buf->f_fsid = (int)dev;
+    buf->f_fsid = (int) dev;
 
     // Bit mask of f_flag values.
     buf->f_flag = 0;
@@ -881,25 +831,12 @@ static int fs_dev_dirnext_r(struct _reent *r, DIR_ITER *dirState, char *filename
     if (st) {
         memset(st, 0, sizeof(struct stat));
 
-        // Turn Wii U's FSStat mode to posix stat
-        if ((dir_entry->stat.flag & FS_DEV_STAT_LINK) == FS_DEV_STAT_LINK) {
-            st->st_mode = S_IFLNK;
-        }
-        else if ((dir_entry->stat.flag & FS_DEV_STAT_DIRECTORY) == FS_DEV_STAT_DIRECTORY) {
-            st->st_mode = S_IFDIR;
-        }
-        else if ((dir_entry->stat.flag & FS_DEV_STAT_FILE) == FS_DEV_STAT_FILE) {
-            st->st_mode = S_IFREG;
-        }
-        else {
-            st->st_mode = 0;
-        }
-
-        // Convert remaining fields to posix stat
+        // Convert fields to posix stat
+        st->st_mode   = fs_dev_translate_mode(dir_entry->stat.flag);
         st->st_nlink  = 1;
         st->st_size   = dir_entry->stat.size;
         st->st_blocks = (dir_entry->stat.size + 511) >> 9;
-        st->st_dev    = (dev_t)dirIter->dev;
+        st->st_dev    = (dev_t) dirIter->dev;
         st->st_uid    = dir_entry->stat.owner_id;
         st->st_gid    = dir_entry->stat.group_id;
         st->st_ino    = dir_entry->stat.id;

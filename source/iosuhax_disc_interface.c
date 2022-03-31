@@ -144,15 +144,14 @@ static bool IOSUHAX_sdio_writeSectors(uint32_t sector, uint32_t numSectors, cons
 }
 
 const DISC_INTERFACE IOSUHAX_sdio_disc_interface = {
-    DEVICE_TYPE_WII_U_SD,
-    FEATURE_MEDIUM_CANREAD | FEATURE_MEDIUM_CANWRITE | FEATURE_WII_U_SD,
-    IOSUHAX_sdio_startup,
-    IOSUHAX_sdio_isInserted,
-    IOSUHAX_sdio_readSectors,
-    IOSUHAX_sdio_writeSectors,
-    IOSUHAX_sdio_clearStatus,
-    IOSUHAX_sdio_shutdown
-};
+        DEVICE_TYPE_WII_U_SD,
+        FEATURE_MEDIUM_CANREAD | FEATURE_MEDIUM_CANWRITE | FEATURE_WII_U_SD,
+        IOSUHAX_sdio_startup,
+        IOSUHAX_sdio_isInserted,
+        IOSUHAX_sdio_readSectors,
+        IOSUHAX_sdio_writeSectors,
+        IOSUHAX_sdio_clearStatus,
+        IOSUHAX_sdio_shutdown};
 
 static bool IOSUHAX_usb_startup(void) {
     if (!IOSUHAX_disc_io_fsa_open(FSA_REF_USB))
@@ -214,12 +213,11 @@ static bool IOSUHAX_usb_writeSectors(uint32_t sector, uint32_t numSectors, const
 }
 
 const DISC_INTERFACE IOSUHAX_usb_disc_interface = {
-    DEVICE_TYPE_WII_U_USB,
-    FEATURE_MEDIUM_CANREAD | FEATURE_MEDIUM_CANWRITE | FEATURE_WII_U_USB,
-    IOSUHAX_usb_startup,
-    IOSUHAX_usb_isInserted,
-    IOSUHAX_usb_readSectors,
-    IOSUHAX_usb_writeSectors,
-    IOSUHAX_usb_clearStatus,
-    IOSUHAX_usb_shutdown
-};
+        DEVICE_TYPE_WII_U_USB,
+        FEATURE_MEDIUM_CANREAD | FEATURE_MEDIUM_CANWRITE | FEATURE_WII_U_USB,
+        IOSUHAX_usb_startup,
+        IOSUHAX_usb_isInserted,
+        IOSUHAX_usb_readSectors,
+        IOSUHAX_usb_writeSectors,
+        IOSUHAX_usb_clearStatus,
+        IOSUHAX_usb_shutdown};
