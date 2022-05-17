@@ -36,22 +36,22 @@
 
 typedef struct _fs_dev_private_t {
     char *mount_path;
-    int fsaFd;
-    int mounted;
+    volatile int fsaFd;
+    volatile int mounted;
     void *pMutex;
 } fs_dev_private_t;
 
 typedef struct _fs_dev_file_state_t {
-    fs_dev_private_t *dev;
-    int fd;                                    /* File descriptor */
-    int flags;                                 /* Opening flags */
-    bool read;                                 /* True if allowed to read from file */
-    bool write;                                /* True if allowed to write to file */
-    bool append;                               /* True if allowed to append to file */
-    uint32_t pos;                              /* Current position within the file (in bytes) */
-    uint32_t len;                              /* Total length of the file (in bytes) */
-    struct _fs_dev_file_state_t *prevOpenFile; /* The previous entry in a double-linked FILO list of open files */
-    struct _fs_dev_file_state_t *nextOpenFile; /* The next entry in a double-linked FILO list of open files */
+    volatile fs_dev_private_t *dev;
+    volatile int fd;                                    /* File descriptor */
+    volatile int flags;                                 /* Opening flags */
+    volatile bool read;                                 /* True if allowed to read from file */
+    volatile bool write;                                /* True if allowed to write to file */
+    volatile bool append;                               /* True if allowed to append to file */
+    volatile uint32_t pos;                              /* Current position within the file (in bytes) */
+    volatile uint32_t len;                              /* Total length of the file (in bytes) */
+    volatile struct _fs_dev_file_state_t *prevOpenFile; /* The previous entry in a double-linked FILO list of open files */
+    volatile struct _fs_dev_file_state_t *nextOpenFile; /* The next entry in a double-linked FILO list of open files */
 } fs_dev_file_state_t;
 
 typedef struct _fs_dev_dir_entry_t {
