@@ -462,8 +462,9 @@ static int fs_dev_stat_r(struct _reent *r, const char *path, struct stat *st) {
 
     FSStat stats;
     int result = IOSUHAX_FSA_GetStat(dev->fsaFd, real_path, &stats);
-    free(real_path);
+
     if (result < 0) {
+        free(real_path);
         r->_errno = fs_dev_translate_error(result);
         OSUnlockMutex(dev->pMutex);
         return -1;
@@ -483,6 +484,8 @@ static int fs_dev_stat_r(struct _reent *r, const char *path, struct stat *st) {
     st->st_atime   = fs_dev_translate_time(stats.modified);
     st->st_ctime   = fs_dev_translate_time(stats.created);
     st->st_mtime   = fs_dev_translate_time(stats.modified);
+
+    free(real_path);
 
     OSUnlockMutex(dev->pMutex);
     return 0;
@@ -509,8 +512,8 @@ static int fs_dev_lstat_r(struct _reent *r, const char *path, struct stat *st) {
 
     FSStat stats;
     int result = IOSUHAX_FSA_GetStat(dev->fsaFd, real_path, &stats);
-    free(real_path);
     if (result < 0) {
+        free(real_path);
         r->_errno = fs_dev_translate_error(result);
         OSUnlockMutex(dev->pMutex);
         return -1;
@@ -530,6 +533,8 @@ static int fs_dev_lstat_r(struct _reent *r, const char *path, struct stat *st) {
     st->st_atime   = fs_dev_translate_time(stats.modified);
     st->st_ctime   = fs_dev_translate_time(stats.created);
     st->st_mtime   = fs_dev_translate_time(stats.modified);
+
+    free(real_path);
 
     OSUnlockMutex(dev->pMutex);
     return 0;
