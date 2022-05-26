@@ -29,10 +29,10 @@
 #define FSA_REF_SD  0x01
 #define FSA_REF_USB 0x02
 
-static int initialized = 0;
+static volatile int initialized = 0;
 
-static int fsaFdSd  = 0;
-static int fsaFdUsb = 0;
+static volatile int fsaFdSd  = 0;
+static volatile int fsaFdUsb = 0;
 static int sdioFd   = 0;
 static int usbFd    = 0;
 

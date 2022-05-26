@@ -65,7 +65,7 @@
 #define IOCTL_FSA_FLUSHVOLUME   0x59
 #define IOCTL_CHECK_IF_IOSUHAX  0x5B
 
-static int iosuhaxHandle = -1;
+static volatile int iosuhaxHandle = -1;
 
 #define ALIGN(align)      __attribute__((aligned(align)))
 #define ALIGN_0x20        ALIGN(0x20)
