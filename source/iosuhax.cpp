@@ -84,7 +84,7 @@ FSError IOSUHAX_FSAMountEx(int clientHandle, const char *source, const char *tar
     if (!buffer) {
         return FS_ERROR_INVALID_BUFFER;
     }
-    auto res = __FSAShimSetupRequestMount(buffer, clientHandle, source, target, 2, arg_buf, arg_len);
+    auto res = __FSAShimSetupRequestMount(buffer, clientHandle, source, target, flags, arg_buf, arg_len);
     if (res != 0) {
         free(buffer);
         return res;
