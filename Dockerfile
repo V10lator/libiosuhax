@@ -6,7 +6,7 @@ RUN git clone -b 4NUSspli --single-branch https://github.com/V10lator/wut && \
  make -j$(nproc) && \
  make install && \
  cd .. && \
- rm -rf wut &&
+ rm -rf wut
 
 WORKDIR tmp_build
 COPY . .
