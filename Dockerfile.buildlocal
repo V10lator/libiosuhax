@@ -9,5 +9,4 @@ RUN git clone -b 4NUSspli --single-branch https://github.com/V10lator/wut && \
  rm -rf wut
 
 WORKDIR project
-FROM wut_update
-COPY /opt/devkitpro/wut /opt/devkitpro/wut
+COPY . .
