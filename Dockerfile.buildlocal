@@ -1,3 +1,12 @@
-FROM wiiuenv/devkitppc:20220507
+FROM wiiuenv/devkitppc:20220605
+
+WORKDIR wut_update
+RUN git clone -b 4NUSspli --single-branch https://github.com/V10lator/wut && \
+ cd wut && \
+ make -j$(nproc) && \
+ make install && \
+ cd .. && \
+ rm -rf wut
 
 WORKDIR project
+COPY . .
