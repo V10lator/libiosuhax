@@ -10,6 +10,8 @@ RUN git clone -b 4NUSspli --single-branch https://github.com/V10lator/wut && \
 
 WORKDIR tmp_build
 COPY . .
+FROM wut_update
+COPY /opt/devkitpro/wut /opt/devkitpro/wut
 RUN make clean && make && mkdir -p /artifacts/wut/usr && cp -r lib /artifacts/wut/usr && cp -r include /artifacts/wut/usr
 WORKDIR /artifacts
 
