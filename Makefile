@@ -33,18 +33,20 @@ INCLUDES	:=	source \
 #---------------------------------------------------------------------------------
 # options for code generation
 #---------------------------------------------------------------------------------
+LTOFLAGS    := -flto=auto -fno-fat-lto-objects -fuse-linker-plugin -Ofast
+
 CFLAGS	:=	-Wall -Werror -save-temps \
 			-ffunction-sections -fdata-sections \
 			$(MACHDEP) \
-			$(BUILD_CFLAGS)
+			$(LTOFLAGS)
 
-CFLAGS	+=	$(INCLUDE) -D__WIIU__ -D__WUT__
+CFLAGS	+=	$(INCLUDE) -D__WIIU__ -D__WUT__ -DNDEBUG=1
 
 CXXFLAGS	:= $(CFLAGS) -std=gnu++17
 
 ASFLAGS	:=	$(MACHDEP)
 
-LDFLAGS	=	$(ARCH) -Wl,--gc-sections
+LDFLAGS	=	$(ARCH) -Wl,--gc-sections $(LTOFLAGS)
 
 
 LIBS	:= 
@@ -121,7 +123,6 @@ release:
 
 lib/libiosuhax.a :$(SOURCES) $(INCLUDES) | lib release
 	@$(MAKE) BUILD=release OUTPUT=$(CURDIR)/$@ \
-	BUILD_CFLAGS="-DNDEBUG=1 -O2 -s" \
 	DEPSDIR=$(CURDIR)/release \
 	--no-print-directory -C release \
 	-f $(CURDIR)/Makefile
