@@ -54,7 +54,7 @@ static bool IOSUHAX_disc_io_fsa_open(int fsaFd) {
     if (fsaFd == FSA_REF_SD) {
         if (fsaFdSd < 0) {
             fsaFdSd = IOS_Open("/dev/fsa", IOS_OPEN_READWRITE);
-            if(fsaFdSd >= 0 && IOSUHAX_UnlockFSClientEx(fsaFdSd) < 0){
+            if (fsaFdSd >= 0 && IOSUHAX_UnlockFSClientEx(fsaFdSd) < 0) {
                 IOS_Close(fsaFdSd);
                 fsaFdSd = -1;
             }
@@ -66,7 +66,7 @@ static bool IOSUHAX_disc_io_fsa_open(int fsaFd) {
     } else if (fsaFd == FSA_REF_USB) {
         if (fsaFdUsb < 0) {
             fsaFdUsb = IOS_Open("/dev/fsa", IOS_OPEN_READWRITE);
-            if(fsaFdUsb >= 0 && IOSUHAX_UnlockFSClientEx(fsaFdUsb) < 0){
+            if (fsaFdUsb >= 0 && IOSUHAX_UnlockFSClientEx(fsaFdUsb) < 0) {
                 IOS_Close(fsaFdUsb);
                 fsaFdUsb = -1;
             }
